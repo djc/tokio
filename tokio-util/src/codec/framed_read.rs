@@ -7,27 +7,20 @@ use bytes::BytesMut;
 use futures_core::Stream;
 use futures_sink::Sink;
 use log::trace;
-use pin_project_lite::pin_project;
 use std::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-pin_project! {
-    /// A `Stream` of messages decoded from an `AsyncRead`.
-    pub struct FramedRead<T, D> {
-        #[pin]
-        inner: FramedRead2<Fuse<T, D>>,
-    }
+/// A `Stream` of messages decoded from an `AsyncRead`.
+pub struct FramedRead<T, D> {
+    inner: FramedRead2<Fuse<T, D>>,
 }
 
-pin_project! {
-    pub(crate) struct FramedRead2<T> {
-        #[pin]
-        inner: T,
-        eof: bool,
-        is_readable: bool,
-        buffer: BytesMut,
-    }
+pub(crate) struct FramedRead2<T> {
+    inner: T,
+    eof: bool,
+    is_readable: bool,
+    buffer: BytesMut,
 }
 
 const INITIAL_CAPACITY: usize = 8 * 1024;
@@ -104,7 +97,7 @@ where
     type Item = Result<D::Item, D::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.poll_next(cx)
     }
 }
 
@@ -116,43 +109,19 @@ where
     type Error = T::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project()
-            .inner
-            .project()
-            .inner
-            .project()
-            .io
-            .poll_ready(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner.inner.io) }.poll_read(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: I) -> Result<(), Self::Error> {
-        self.project()
-            .inner
-            .project()
-            .inner
-            .project()
-            .io
-            .start_send(item)
+        unsafe { Pin::new_unchecked(&mut self.inner.inner.io) }.start_send(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project()
-            .inner
-            .project()
-            .inner
-            .project()
-            .io
-            .poll_flush(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner.inner.io) }.poll_flush(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project()
-            .inner
-            .project()
-            .inner
-            .project()
-            .io
-            .poll_close(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner.inner.io) }.poll_close(cx)
     }
 }
 
@@ -214,7 +183,7 @@ impl<T> FramedRead2<T> {
     }
 
     pub(crate) fn get_pin_mut(self: Pin<&mut Self>) -> Pin<&mut T> {
-        self.project().inner
+        unsafe { Pin::new_unchecked(&mut self.inner) }
     }
 
     pub(crate) fn buffer(&self) -> &BytesMut {
@@ -230,15 +199,14 @@ where
     type Item = Result<<T::Codec as Decoder>::Item, <T::Codec as Decoder>::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut pinned = self.project();
         loop {
             // Repeatedly call `decode` or `decode_eof` as long as it is
             // "readable". Readable is defined as not having returned `None`. If
             // the upstream has returned EOF, and the decoder is no longer
             // readable, it can be assumed that the decoder will never become
             // readable again, at which point the stream is terminated.
-            if *pinned.is_readable {
-                if *pinned.eof {
+            if *self.is_readable {
+                if *self.eof {
                     let frame = pinned
                         .inner
                         .as_mut()

@@ -8,30 +8,23 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite};
 use bytes::BytesMut;
 use futures_core::Stream;
 use futures_sink::Sink;
-use pin_project_lite::pin_project;
 use std::fmt;
 use std::io::{self, BufRead, Read, Write};
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-pin_project! {
-    /// A unified `Stream` and `Sink` interface to an underlying I/O object, using
-    /// the `Encoder` and `Decoder` traits to encode and decode frames.
-    ///
-    /// You can create a `Framed` instance by using the `AsyncRead::framed` adapter.
-    pub struct Framed<T, U> {
-        #[pin]
-        inner: FramedRead2<FramedWrite2<Fuse<T, U>>>,
-    }
+/// A unified `Stream` and `Sink` interface to an underlying I/O object, using
+/// the `Encoder` and `Decoder` traits to encode and decode frames.
+///
+/// You can create a `Framed` instance by using the `AsyncRead::framed` adapter.
+pub struct Framed<T, U> {
+    inner: FramedRead2<FramedWrite2<Fuse<T, U>>>,
 }
 
-pin_project! {
-    pub(crate) struct Fuse<T, U> {
-        #[pin]
-        pub(crate) io: T,
-        pub(crate) codec: U,
-    }
+pub(crate) struct Fuse<T, U> {
+    pub(crate) io: T,
+    pub(crate) codec: U,
 }
 
 /// Abstracts over `FramedRead2` being either `FramedRead2<FramedWrite2<Fuse<T, U>>>` or
@@ -201,7 +194,7 @@ where
     type Item = Result<U::Item, U::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.poll_next(cx)
     }
 }
 
@@ -214,19 +207,19 @@ where
     type Error = U::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.get_pin_mut().poll_ready(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: I) -> Result<(), Self::Error> {
-        self.project().inner.get_pin_mut().start_send(item)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.start_send(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.get_pin_mut().poll_flush(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.poll_flush(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.get_pin_mut().poll_close(cx)
+        unsafe { Pin::new_unchecked(&mut self.inner) }.poll_close(cx)
     }
 }
 
